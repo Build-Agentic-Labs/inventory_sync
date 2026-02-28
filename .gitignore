@@ -1,0 +1,34 @@
+# Build artifacts
+dist/
+build/
+__pycache__/
+*.pyc
+
+# PyInstaller
+*.manifest
+*.spec.bak
+
+# Secrets and config
+.env
+config.json
+
+# Generated files
+order_pdfs/
+nul
+
+# Data files
+*.xlsx
+
+# Screenshots
+Screenshot *.png
+
+# Claude Code local config
+.claude/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+desktop.ini
