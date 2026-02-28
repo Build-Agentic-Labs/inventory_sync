@@ -25,8 +25,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install pandas openpyxl supabase pillow pystray reportlab pywin32 sv-ttk requests httpx
           pip install pyinstaller
+          python -c "import pandas; print(f'pandas {pandas.__version__} OK')"
+          python -c "import supabase; print('supabase OK')"
+          python -c "import openpyxl; print('openpyxl OK')"
 
       - name: Determine next version
         id: version
@@ -68,7 +71,13 @@ jobs:
             echo "ERROR: Build failed - InventorySync.exe not found"
             exit 1
           fi
-          echo "Build successful! Size: $(stat -c%s dist/InventorySync.exe) bytes"
+          SIZE=$(stat -c%s dist/InventorySync.exe)
+          echo "Build successful! Size: $SIZE bytes ($(( SIZE / 1024 / 1024 )) MB)"
+          # Sanity check - exe with all deps should be at least 30MB
+          if [ "$SIZE" -lt 30000000 ]; then
+            echo "WARNING: Exe seems too small - dependencies may not be bundled!"
+            exit 1
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
