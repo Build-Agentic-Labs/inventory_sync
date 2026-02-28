@@ -169,10 +169,10 @@ title Inventory Sync Updater
 echo Updating Inventory Sync...
 echo Waiting for application to close...
 
-REM Wait for the main process to exit (retry for up to 30 seconds)
+REM Wait for ALL InventorySync processes to exit (retry for up to 30 seconds)
 set /a attempts=0
 :waitloop
-tasklist /FI "PID eq {os.getpid()}" 2>NUL | find /I "{current_exe.name}" >NUL
+tasklist /FI "IMAGENAME eq {current_exe.name}" 2>NUL | find /I "{current_exe.name}" >NUL
 if %ERRORLEVEL%==0 (
     set /a attempts+=1
     if %attempts% GEQ 30 (
@@ -184,8 +184,8 @@ if %ERRORLEVEL%==0 (
     goto waitloop
 )
 
-REM Extra safety delay
-timeout /t 2 /nobreak >NUL
+REM Wait for temp files to be fully released
+timeout /t 5 /nobreak >NUL
 
 echo Applying update...
 copy /Y "{temp_exe_path}" "{current_exe}" >NUL
