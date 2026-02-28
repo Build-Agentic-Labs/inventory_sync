@@ -2280,6 +2280,18 @@ class SetupWindow:
         save_btn = ModernButton(container, text="Save Settings", primary=True, command=self.save_and_start)
         save_btn.pack()
 
+        # Version and Update section
+        version_frame = ttk.Frame(container)
+        version_frame.pack(pady=(15, 0))
+
+        ttk.Label(version_frame, text=f"v{APP_VERSION}",
+                  font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 10))
+
+        if HAS_UPDATER:
+            self.update_btn = ModernButton(version_frame, text="Check for Updates",
+                                           primary=False, command=self.check_for_updates)
+            self.update_btn.pack(side=tk.LEFT)
+
     def _clear_entry_selection(self, event=None):
         """Clear text selection/highlight from entry fields"""
         if event and hasattr(event.widget, 'selection_clear'):
@@ -2294,6 +2306,35 @@ class SetupWindow:
         if not isinstance(widget, (ttk.Entry, tk.Entry)):
             # Click was outside input fields, remove focus
             self.root.focus()
+
+    def check_for_updates(self):
+        """Check for updates when button is clicked."""
+        self.update_btn.configure(text="Checking...", state='disabled')
+        self.root.update()
+
+        def _check():
+            has_update, latest_version, download_url = auto_updater.check_for_update(APP_VERSION)
+            self.root.after(0, lambda: self._on_update_check_done(has_update, latest_version, download_url))
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _on_update_check_done(self, has_update, latest_version, download_url):
+        """Handle update check result on main thread."""
+        try:
+            self.update_btn.configure(text="Check for Updates", state='normal')
+        except tk.TclError:
+            return
+
+        if has_update:
+            # Close settings and trigger the update prompt
+            self.root.destroy()
+            global settings_window
+            settings_window = None
+            prompt_update(latest_version, download_url)
+        else:
+            messagebox.showinfo("Up to Date",
+                                f"You're running the latest version (v{APP_VERSION}).",
+                                parent=self.root)
 
     def browse_folder(self):
         folder = filedialog.askdirectory(initialdir=self.folder_var.get())
