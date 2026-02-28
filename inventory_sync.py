@@ -2647,6 +2647,11 @@ def check_pending_actions():
 
 def prompt_update(latest_version, download_url):
     """Show update dialog to the user (must be called from main thread)."""
+    # Temporarily show and lift main_root so the dialog appears in foreground
+    main_root.deiconify()
+    main_root.attributes('-topmost', True)
+    main_root.update()
+
     answer = messagebox.askyesno(
         "Update Available",
         f"A new version of Inventory Sync is available!\n\n"
@@ -2656,6 +2661,10 @@ def prompt_update(latest_version, download_url):
         parent=main_root
     )
 
+    # Hide main_root again
+    main_root.attributes('-topmost', False)
+    main_root.withdraw()
+
     if not answer:
         return
 
@@ -2664,7 +2673,7 @@ def prompt_update(latest_version, download_url):
     progress_win.title("Updating...")
     progress_win.geometry("350x120")
     progress_win.resizable(False, False)
-    progress_win.transient(main_root)
+    progress_win.attributes('-topmost', True)
     progress_win.grab_set()
 
     tk.Label(progress_win, text="Downloading update...", font=("Segoe UI", 11)).pack(pady=(15, 5))
