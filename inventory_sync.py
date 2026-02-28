@@ -1886,7 +1886,7 @@ class SetupWindow:
             sv_ttk.set_theme("dark")
             init_styles()
 
-        self.root.title("Inventory Sync")
+        self.root.title(f"Inventory Sync v{APP_VERSION}")
         self.root.geometry("900x950")
         self.root.resizable(True, True)
 
