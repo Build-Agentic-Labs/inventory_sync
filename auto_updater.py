@@ -164,28 +164,32 @@ def apply_update(temp_exe_path):
     updater_bat = install_dir / "_updater.bat"
 
     # Write the updater batch script
+    temp_dir = os.environ.get('TEMP', os.environ.get('TMP', ''))
     bat_content = f'''@echo off
 title Inventory Sync Updater
 echo Updating Inventory Sync...
 echo Waiting for application to close...
 
-REM Wait for ALL InventorySync processes to exit (retry for up to 30 seconds)
-set /a attempts=0
+REM Wait briefly then force-kill any remaining InventorySync processes
+timeout /t 3 /nobreak >NUL
+taskkill /F /IM {current_exe.name} >NUL 2>&1
+
+REM Wait for processes to fully terminate
 :waitloop
 tasklist /FI "IMAGENAME eq {current_exe.name}" 2>NUL | find /I "{current_exe.name}" >NUL
 if %ERRORLEVEL%==0 (
-    set /a attempts+=1
-    if %attempts% GEQ 30 (
-        echo Timeout waiting for app to close. Please close it manually and re-run the update.
-        pause
-        goto cleanup
-    )
     timeout /t 1 /nobreak >NUL
+    taskkill /F /IM {current_exe.name} >NUL 2>&1
     goto waitloop
 )
 
-REM Wait for temp files to be fully released
-timeout /t 5 /nobreak >NUL
+REM Clean up PyInstaller temp extraction folders that may hold the Python DLL
+for /d %%i in ("{temp_dir}\\_MEI*") do (
+    rmdir /s /q "%%i" >NUL 2>&1
+)
+
+REM Wait for filesystem to settle
+timeout /t 3 /nobreak >NUL
 
 echo Applying update...
 copy /Y "{temp_exe_path}" "{current_exe}" >NUL
