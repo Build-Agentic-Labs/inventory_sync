@@ -23,7 +23,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.colors import HexColor, black
 
 # App version - auto-injected by GitHub Actions on each release build
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.0"  # CI replaces this on every build
 
 # Auto-updater
 try:
