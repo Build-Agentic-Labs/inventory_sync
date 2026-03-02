@@ -2773,7 +2773,7 @@ def run_tray(config_data):
     tray_icon = pystray.Icon("inventory_sync", icon_image, "Inventory Sync", menu)
 
     print("\n" + "="*50)
-    print("Inventory Sync is running in the system tray")
+    print(f"Inventory Sync v{APP_VERSION} is running in the system tray")
     print("="*50)
     print(f"Watching: {config['watch_folder']}")
     print(f"Pattern: {config['file_pattern']}")
