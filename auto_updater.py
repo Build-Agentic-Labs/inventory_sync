@@ -123,10 +123,9 @@ def download_update(download_url, progress_callback=None):
 
         total_size = int(resp.headers.get('content-length', 0))
 
-        # Download to a temp file in the same directory as the install
-        install_dir = Path(os.environ['LOCALAPPDATA']) / 'InventorySync'
-        install_dir.mkdir(parents=True, exist_ok=True)
-        temp_path = install_dir / "InventorySync_update.exe"
+        # Download to system temp dir (NOT the install dir) to avoid conflicts
+        temp_dir = Path(os.environ.get('TEMP', os.environ.get('TMP', '')))
+        temp_path = temp_dir / "InventorySync_update.exe"
 
         downloaded = 0
         with open(temp_path, 'wb') as f:
@@ -148,9 +147,10 @@ def download_update(download_url, progress_callback=None):
 def apply_update(temp_exe_path):
     """
     Apply the update by launching a batch script that:
-    1. Waits for the current process to exit
-    2. Replaces the exe
-    3. Restarts the app
+    1. Force-kills all InventorySync processes
+    2. Cleans up PyInstaller _MEI temp dirs
+    3. Deletes the old exe and renames the new one in place
+    4. Restarts the app
 
     Args:
         temp_exe_path: Path to the downloaded new exe.
@@ -161,53 +161,83 @@ def apply_update(temp_exe_path):
         return False
 
     install_dir = current_exe.parent
+    installed_exe = install_dir / "InventorySync.exe"
+    staged_exe = install_dir / "InventorySync_new.exe"
     updater_bat = install_dir / "_updater.bat"
 
-    # Write the updater batch script
     temp_dir = os.environ.get('TEMP', os.environ.get('TMP', ''))
     bat_content = f'''@echo off
 title Inventory Sync Updater
 echo Updating Inventory Sync...
-echo Waiting for application to close...
 
-REM Wait briefly then force-kill any remaining InventorySync processes
-timeout /t 3 /nobreak >NUL
-taskkill /F /IM {current_exe.name} >NUL 2>&1
-
-REM Wait for processes to fully terminate
-:waitloop
-tasklist /FI "IMAGENAME eq {current_exe.name}" 2>NUL | find /I "{current_exe.name}" >NUL
-if %ERRORLEVEL%==0 (
-    timeout /t 1 /nobreak >NUL
-    taskkill /F /IM {current_exe.name} >NUL 2>&1
-    goto waitloop
-)
-
-REM Clean up PyInstaller temp extraction folders that may hold the Python DLL
-for /d %%i in ("{temp_dir}\\_MEI*") do (
-    rmdir /s /q "%%i" >NUL 2>&1
-)
-
-REM Wait for filesystem to settle
-timeout /t 3 /nobreak >NUL
-
-echo Applying update...
-copy /Y "{temp_exe_path}" "{current_exe}" >NUL
+REM --- Step 1: Stage the update file into install dir ---
+echo Staging update...
+copy /Y "{temp_exe_path}" "{staged_exe}" >NUL
 if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Could not replace the executable.
-    echo Please close all instances and try again.
+    echo ERROR: Could not stage update file.
     pause
     goto cleanup
 )
 
-echo Update complete! Restarting...
-start "" "{current_exe}"
+REM --- Step 2: Force-kill ALL InventorySync processes ---
+echo Stopping application...
+taskkill /F /IM InventorySync.exe >NUL 2>&1
+taskkill /F /IM InventorySync_new.exe >NUL 2>&1
+
+REM Wait until no InventorySync processes remain
+:waitloop
+timeout /t 2 /nobreak >NUL
+tasklist /FI "IMAGENAME eq InventorySync.exe" 2>NUL | find /I "InventorySync.exe" >NUL
+if %ERRORLEVEL%==0 (
+    taskkill /F /IM InventorySync.exe >NUL 2>&1
+    goto waitloop
+)
+
+REM --- Step 3: Clean up PyInstaller _MEI temp extraction dirs ---
+echo Cleaning up temp files...
+for /d %%i in ("{temp_dir}\\_MEI*") do (
+    rmdir /s /q "%%i" >NUL 2>&1
+)
+
+REM --- Step 4: Wait for Windows to fully release file handles ---
+timeout /t 5 /nobreak >NUL
+
+REM --- Step 5: Replace exe using delete + rename (atomic on same drive) ---
+echo Applying update...
+del /F /Q "{installed_exe}" >NUL 2>&1
+
+REM Retry delete if file is still locked
+if exist "{installed_exe}" (
+    timeout /t 3 /nobreak >NUL
+    del /F /Q "{installed_exe}" >NUL 2>&1
+)
+if exist "{installed_exe}" (
+    timeout /t 5 /nobreak >NUL
+    del /F /Q "{installed_exe}" >NUL 2>&1
+)
+if exist "{installed_exe}" (
+    echo ERROR: Could not remove old executable. It may still be in use.
+    pause
+    goto cleanup
+)
+
+rename "{staged_exe}" "InventorySync.exe"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Could not rename update file.
+    pause
+    goto cleanup
+)
+
+REM --- Step 6: Launch updated app ---
+echo Update complete! Starting v new version...
+timeout /t 2 /nobreak >NUL
+start "" "{installed_exe}"
 
 :cleanup
-REM Clean up the downloaded update file
-if exist "{temp_exe_path}" del "{temp_exe_path}"
+REM Clean up temp download
+if exist "{temp_exe_path}" del /Q "{temp_exe_path}"
 
-REM Self-delete this batch file
+REM Self-delete
 (goto) 2>nul & del "%~f0"
 '''
 
@@ -215,10 +245,11 @@ REM Self-delete this batch file
         with open(updater_bat, 'w') as f:
             f.write(bat_content)
 
-        # Launch the updater script (hidden window)
+        # Launch the updater script fully detached
         subprocess.Popen(
             ['cmd', '/c', str(updater_bat)],
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+            close_fds=True,
             cwd=str(install_dir)
         )
         print("Auto-updater: Updater script launched, exiting for update...")
