@@ -2761,7 +2761,7 @@ def run_tray(config_data):
     icon_image = create_tray_icon()
 
     menu = pystray.Menu(
-        item('Inventory Sync', None, enabled=False),
+        item(f'Inventory Sync v{APP_VERSION}', None, enabled=False),
         item('─────────────', None, enabled=False),
         item('Sync Now', lambda: sync_now()),
         item('View Orders', lambda: request_show_orders()),
