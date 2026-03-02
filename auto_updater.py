@@ -229,9 +229,9 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 REM --- Step 6: Launch updated app ---
-echo Update complete! Starting v new version...
+echo Update complete! Starting new version...
 timeout /t 2 /nobreak >NUL
-start "" "{installed_exe}"
+"{installed_exe}"
 
 :cleanup
 REM Clean up temp download
@@ -245,11 +245,10 @@ REM Self-delete
         with open(updater_bat, 'w') as f:
             f.write(bat_content)
 
-        # Launch the updater script fully detached
+        # Launch the updater script - CREATE_NO_WINDOW only (DETACHED_PROCESS breaks start)
         subprocess.Popen(
             ['cmd', '/c', str(updater_bat)],
-            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-            close_fds=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
             cwd=str(install_dir)
         )
         print("Auto-updater: Updater script launched, exiting for update...")
