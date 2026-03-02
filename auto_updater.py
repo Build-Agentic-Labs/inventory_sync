@@ -109,13 +109,14 @@ def check_for_update(current_version):
 def download_update(download_url, progress_callback=None):
     """
     Download the updated exe from a GitHub Release asset URL.
+    Downloads directly to the install directory as InventorySync_update.exe.
 
     Args:
         download_url: The browser download URL for the asset.
         progress_callback: Optional function(bytes_downloaded, total_bytes).
 
     Returns:
-        Path to the downloaded temp file, or None on failure.
+        Path to the downloaded file, or None on failure.
     """
     try:
         resp = requests.get(download_url, stream=True, timeout=300)
@@ -123,12 +124,13 @@ def download_update(download_url, progress_callback=None):
 
         total_size = int(resp.headers.get('content-length', 0))
 
-        # Download to system temp dir (NOT the install dir) to avoid conflicts
-        temp_dir = Path(os.environ.get('TEMP', os.environ.get('TMP', '')))
-        temp_path = temp_dir / "InventorySync_update.exe"
+        # Download directly to install dir — no extra copy needed later
+        install_dir = Path(os.environ['LOCALAPPDATA']) / 'InventorySync'
+        install_dir.mkdir(parents=True, exist_ok=True)
+        update_path = install_dir / "InventorySync_update.exe"
 
         downloaded = 0
-        with open(temp_path, 'wb') as f:
+        with open(update_path, 'wb') as f:
             for chunk in resp.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
@@ -136,24 +138,21 @@ def download_update(download_url, progress_callback=None):
                     if progress_callback and total_size:
                         progress_callback(downloaded, total_size)
 
-        print(f"Auto-updater: Downloaded update to {temp_path} ({downloaded} bytes)")
-        return temp_path
+        print(f"Auto-updater: Downloaded update to {update_path} ({downloaded} bytes)")
+        return update_path
 
     except Exception as e:
         print(f"Auto-updater: Error downloading update: {e}")
         return None
 
 
-def apply_update(temp_exe_path):
+def apply_update(update_exe_path):
     """
     Apply the update by launching a batch script that:
     1. Force-kills all InventorySync processes
-    2. Cleans up PyInstaller _MEI temp dirs
-    3. Deletes the old exe and renames the new one in place
+    2. Waits for _MEI temp dirs to be released
+    3. Deletes old exe, renames new one (no copy — both in same dir)
     4. Restarts the app
-
-    Args:
-        temp_exe_path: Path to the downloaded new exe.
     """
     current_exe = get_current_exe()
     if not current_exe:
@@ -162,29 +161,19 @@ def apply_update(temp_exe_path):
 
     install_dir = current_exe.parent
     installed_exe = install_dir / "InventorySync.exe"
-    staged_exe = install_dir / "InventorySync_new.exe"
+    updater_vbs = install_dir / "_updater.vbs"
     updater_bat = install_dir / "_updater.bat"
 
     temp_dir = os.environ.get('TEMP', os.environ.get('TMP', ''))
+
+    # The batch script only does: kill, wait, delete old, rename new, launch
+    # NO copy involved — update_exe_path is already in the install dir
     bat_content = f'''@echo off
-title Inventory Sync Updater
-echo Updating Inventory Sync...
 
-REM --- Step 1: Stage the update file into install dir ---
-echo Staging update...
-copy /Y "{temp_exe_path}" "{staged_exe}" >NUL
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Could not stage update file.
-    pause
-    goto cleanup
-)
-
-REM --- Step 2: Force-kill ALL InventorySync processes ---
-echo Stopping application...
+REM --- Force-kill ALL InventorySync processes ---
 taskkill /F /IM InventorySync.exe >NUL 2>&1
-taskkill /F /IM InventorySync_new.exe >NUL 2>&1
 
-REM Wait until no InventorySync processes remain
+REM --- Wait until no InventorySync processes remain ---
 :waitloop
 timeout /t 2 /nobreak >NUL
 tasklist /FI "IMAGENAME eq InventorySync.exe" 2>NUL | find /I "InventorySync.exe" >NUL
@@ -193,62 +182,44 @@ if %ERRORLEVEL%==0 (
     goto waitloop
 )
 
-REM --- Step 3: Clean up PyInstaller _MEI temp extraction dirs ---
-echo Cleaning up temp files...
-for /d %%i in ("{temp_dir}\\_MEI*") do (
-    rmdir /s /q "%%i" >NUL 2>&1
-)
+REM --- Wait for PyInstaller _MEI temp dirs to be fully released ---
+timeout /t 8 /nobreak >NUL
 
-REM --- Step 4: Wait for Windows to fully release file handles ---
-timeout /t 5 /nobreak >NUL
-
-REM --- Step 5: Replace exe using delete + rename (atomic on same drive) ---
-echo Applying update...
+REM --- Delete old exe (retry up to 3 times) ---
 del /F /Q "{installed_exe}" >NUL 2>&1
-
-REM Retry delete if file is still locked
 if exist "{installed_exe}" (
-    timeout /t 3 /nobreak >NUL
+    timeout /t 5 /nobreak >NUL
     del /F /Q "{installed_exe}" >NUL 2>&1
 )
 if exist "{installed_exe}" (
     timeout /t 5 /nobreak >NUL
     del /F /Q "{installed_exe}" >NUL 2>&1
 )
-if exist "{installed_exe}" (
-    echo ERROR: Could not remove old executable. It may still be in use.
-    pause
-    goto cleanup
-)
 
-rename "{staged_exe}" "InventorySync.exe"
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Could not rename update file.
-    pause
-    goto cleanup
-)
+REM --- Rename update to InventorySync.exe (atomic — same directory) ---
+rename "{update_exe_path}" "InventorySync.exe"
 
-REM --- Step 6: Launch updated app ---
-echo Update complete! Starting new version...
+REM --- Launch the updated app ---
 timeout /t 2 /nobreak >NUL
-"{installed_exe}"
+start "" "{installed_exe}"
 
-:cleanup
-REM Clean up temp download
-if exist "{temp_exe_path}" del /Q "{temp_exe_path}"
-
-REM Self-delete
+REM --- Self-delete ---
 (goto) 2>nul & del "%~f0"
 '''
+
+    # Use a VBScript wrapper to launch the batch script truly hidden
+    vbs_content = f'CreateObject("WScript.Shell").Run "cmd /c ""{updater_bat}""", 0, False\n'
 
     try:
         with open(updater_bat, 'w') as f:
             f.write(bat_content)
 
-        # Launch the updater script - CREATE_NO_WINDOW only (DETACHED_PROCESS breaks start)
+        with open(updater_vbs, 'w') as f:
+            f.write(vbs_content)
+
+        # Launch via VBScript for a truly hidden window that can still use 'start'
         subprocess.Popen(
-            ['cmd', '/c', str(updater_bat)],
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            ['wscript', str(updater_vbs)],
             cwd=str(install_dir)
         )
         print("Auto-updater: Updater script launched, exiting for update...")
